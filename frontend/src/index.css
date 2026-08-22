@@ -334,13 +334,15 @@ h2 {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 15px;
-  background: #fafcff;
+  background: #ffffff;
 }
 
 .evidence-header {
   width: 100%;
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 14px;
   padding: 14px 16px;
   border: 0;
   background: transparent;
@@ -348,29 +350,104 @@ h2 {
   text-align: left;
 }
 
+.evidence-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.evidence-header strong {
+  font-size: 13px;
+}
+
 .evidence-header span {
   color: var(--muted);
-}
-
-.evidence-body {
-  padding: 0 16px 15px;
-  border-top: 1px solid var(--border);
-}
-
-.evidence-body > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  padding-top: 11px;
   font-size: 11px;
 }
 
-.evidence-body span {
-  color: var(--muted);
+.evidence-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
 }
 
-.evidence-body strong {
-  text-align: right;
+.trace-list {
+  position: relative;
+  padding: 12px 0 6px 10px;
+  margin-left: 10px;
+}
+
+.trace-list::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 12px;
+  left: 18px;
+  width: 1px;
+  background: #dfe7f0;
+}
+
+.trace-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 10px 0;
+}
+
+.trace-number {
+  position: relative;
+  z-index: 1;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.trace-content {
+  flex: 1;
+  padding-top: 5px;
+}
+
+.trace-label {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.trace-value {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 700;
+}
+
+.policy-rule-box {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.policy-rule-label {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.policy-rule-text {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  font-weight: 600;
 }
 
 /* RESULT */

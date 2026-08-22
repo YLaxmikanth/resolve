@@ -92,6 +92,29 @@ function App() {
   const isEscalated =
     result?.finalStatus === "ESCALATED_TO_HUMAN";
 
+  const decisionTrace = [
+    {
+      label: "Intent identified",
+      value: result?.intent || "—",
+    },
+    {
+      label: "Evidence gathered",
+      value: `Payment: ${result?.investigation?.paymentStatus || "—"} · Order: ${result?.investigation?.orderStatus || "—"}`,
+    },
+    {
+      label: "Policy evaluated",
+      value: result?.policy?.decision || "—",
+    },
+    {
+      label: "Action executed",
+      value: result?.action?.action || result?.resolution?.action || "—",
+    },
+    {
+      label: "Outcome verified",
+      value: result?.verification?.status || "—",
+    },
+  ];
+
   const getStepClass = (index) => {
     if (loading && index === activeStep) {
       return "active";
@@ -228,58 +251,42 @@ function App() {
 
           </div>
 
-          {/* EVIDENCE */}
+          {/* DECISION TRACE */}
           {result && result.finalStatus !== "ERROR" && (
-            <div className="evidence">
-
+            <div className="evidence decision-trace">
               <button
-                onClick={() =>
-                  setShowEvidence((value) => !value)
-                }
+                onClick={() => setShowEvidence((value) => !value)}
                 className="evidence-header"
               >
-                <strong>Why this decision?</strong>
-                <span>
-                  {showEvidence ? "−" : "+"}
-                </span>
+                <div>
+                  <strong>Decision trace</strong>
+                  <span>Evidence behind the resolution</span>
+                </div>
+                <span>{showEvidence ? "−" : "+"}</span>
               </button>
 
               {showEvidence && (
                 <div className="evidence-body">
-
-                  <div>
-                    <span>Intent</span>
-                    <strong>
-                      {result.intent || "—"}
-                    </strong>
+                  <div className="trace-list">
+                    {decisionTrace.map((stage, index) => (
+                      <div key={stage.label} className="trace-item">
+                        <div className="trace-number">{index + 1}</div>
+                        <div className="trace-content">
+                          <div className="trace-label">{stage.label}</div>
+                          <div className="trace-value">{stage.value}</div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
-                  <div>
-                    <span>Payment</span>
-                    <strong>
-                      {result.investigation?.paymentStatus ||
-                        "—"}
-                    </strong>
+                  <div className="policy-rule-box">
+                    <div className="policy-rule-label">POLICY RULE</div>
+                    <div className="policy-rule-text">
+                      {result?.policy?.rule || "—"}
+                    </div>
                   </div>
-
-                  <div>
-                    <span>Order</span>
-                    <strong>
-                      {result.investigation?.orderStatus ||
-                        "—"}
-                    </strong>
-                  </div>
-
-                  <div>
-                    <span>Policy</span>
-                    <strong>
-                      {result.policy?.decision || "—"}
-                    </strong>
-                  </div>
-
                 </div>
               )}
-
             </div>
           )}
         </section>
