@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const QUICK_CASES = [
   "₹4,999 was deducted but my order failed.",
@@ -6,18 +6,59 @@ const QUICK_CASES = [
   "I don't recognize this transaction.",
 ];
 
-const WORKFLOW = ["UNDERSTAND", "INVESTIGATE", "REASON", "ACT", "VERIFY"];
+const WORKFLOW = [
+  {
+    name: "UNDERSTAND",
+    description: "Understand customer intent",
+  },
+  {
+    name: "INVESTIGATE",
+    description: "Gather evidence",
+  },
+  {
+    name: "REASON",
+    description: "Apply knowledge & policy",
+  },
+  {
+    name: "ACT",
+    description: "Execute permitted action",
+  },
+  {
+    name: "VERIFY",
+    description: "Confirm outcome",
+  },
+];
 
 function App() {
   const [message, setMessage] = useState(QUICK_CASES[0]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [activeStep, setActiveStep] = useState(-1);
   const [showEvidence, setShowEvidence] = useState(true);
 
+  useEffect(() => {
+    if (!loading) return;
+
+    setActiveStep(0);
+
+    const interval = setInterval(() => {
+      setActiveStep((current) => {
+        if (current >= WORKFLOW.length - 1) {
+          return current;
+        }
+
+        return current + 1;
+      });
+    }, 650);
+
+    return () => clearInterval(interval);
+  }, [loading]);
+
   const resolveCase = async () => {
-    if (!message.trim()) return;
+    if (!message.trim() || loading) return;
 
     setLoading(true);
+    setResult(null);
 
     try {
       const response = await fetch("http://localhost:5000/api/resolve", {
@@ -34,8 +75,11 @@ function App() {
         throw new Error(data.error || "Unable to resolve case");
       }
 
+      setActiveStep(WORKFLOW.length);
       setResult(data);
     } catch (error) {
+      setActiveStep(-1);
+
       setResult({
         finalStatus: "ERROR",
         error: error.message,
@@ -45,10 +89,25 @@ function App() {
     }
   };
 
-  const isEscalated = result?.finalStatus === "ESCALATED_TO_HUMAN";
+  const isEscalated =
+    result?.finalStatus === "ESCALATED_TO_HUMAN";
+
+  const getStepClass = (index) => {
+    if (loading && index === activeStep) {
+      return "active";
+    }
+
+    if (result && index < WORKFLOW.length) {
+      return "complete";
+    }
+
+    return "";
+  };
 
   return (
     <div className="app">
+
+      {/* HEADER */}
       <header className="topbar">
         <div>
           <div className="brand">Resolve</div>
@@ -65,9 +124,11 @@ function App() {
 
       <main className="dashboard">
 
-        {/* LEFT */}
+        {/* CUSTOMER ISSUE */}
         <section className="panel input-panel">
-          <div className="section-label">CUSTOMER ISSUE</div>
+          <div className="section-label">
+            CUSTOMER ISSUE
+          </div>
 
           <h2>What needs to be resolved?</h2>
 
@@ -75,9 +136,12 @@ function App() {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             placeholder="Describe the customer's problem..."
+            disabled={loading}
           />
 
-          <div className="quick-label">QUICK SCENARIOS</div>
+          <div className="quick-label">
+            QUICK SCENARIOS
+          </div>
 
           <div className="quick-list">
             {QUICK_CASES.map((item) => (
@@ -85,6 +149,7 @@ function App() {
                 key={item}
                 onClick={() => setMessage(item)}
                 className="quick-case"
+                disabled={loading}
               >
                 {item}
               </button>
@@ -96,54 +161,59 @@ function App() {
             onClick={resolveCase}
             disabled={loading}
           >
-            {loading ? "Resolving..." : "Resolve Case →"}
+            {loading ? "Resolve is working..." : "Resolve Case →"}
           </button>
         </section>
 
-        {/* CENTER */}
+        {/* WORKFLOW */}
         <section className="panel workflow-panel">
-          <div className="section-label">AI ORCHESTRATION</div>
+          <div className="section-label">
+            AI ORCHESTRATION
+          </div>
 
           <h2>Resolution workflow</h2>
 
           <div className="workflow">
             {WORKFLOW.map((step, index) => (
-              <div className="workflow-item" key={step}>
+              <div className="workflow-item" key={step.name}>
+
                 <div
-                  className={`workflow-node ${
-                    result ? "active" : ""
-                  }`}
+                  className={`workflow-node ${getStepClass(index)}`}
                 >
-                  {index + 1}
+                  {result && index < activeStep ? "✓" : index + 1}
                 </div>
 
                 <div className="workflow-text">
-                  <strong>{step}</strong>
-                  <span>
-                    {index === 0 && "Understand customer intent"}
-                    {index === 1 && "Gather evidence"}
-                    {index === 2 && "Apply knowledge & policy"}
-                    {index === 3 && "Execute permitted action"}
-                    {index === 4 && "Confirm outcome"}
-                  </span>
+                  <strong>{step.name}</strong>
+                  <span>{step.description}</span>
                 </div>
 
                 {index < WORKFLOW.length - 1 && (
-                  <div className="workflow-line"></div>
+                  <div
+                    className={`workflow-line ${
+                      result || activeStep > index
+                        ? "complete"
+                        : ""
+                    }`}
+                  />
                 )}
               </div>
             ))}
           </div>
 
+          {/* ORCHESTRATOR */}
           <div className="agent-box">
+
             <div className="agent-header">
               <div>
                 <strong>AI Orchestrator</strong>
-                <span>Specialized agents coordinated</span>
+                <span>
+                  Specialized agents coordinated
+                </span>
               </div>
 
               <div className="active-badge">
-                ACTIVE
+                {loading ? "PROCESSING" : "READY"}
               </div>
             </div>
 
@@ -155,16 +225,23 @@ function App() {
               <span>Action Engine</span>
               <span>Verification</span>
             </div>
+
           </div>
 
-          {result && (
+          {/* EVIDENCE */}
+          {result && result.finalStatus !== "ERROR" && (
             <div className="evidence">
+
               <button
-                onClick={() => setShowEvidence(!showEvidence)}
+                onClick={() =>
+                  setShowEvidence((value) => !value)
+                }
                 className="evidence-header"
               >
                 <strong>Why this decision?</strong>
-                <span>{showEvidence ? "−" : "+"}</span>
+                <span>
+                  {showEvidence ? "−" : "+"}
+                </span>
               </button>
 
               {showEvidence && (
@@ -172,20 +249,24 @@ function App() {
 
                   <div>
                     <span>Intent</span>
-                    <strong>{result.intent || "—"}</strong>
+                    <strong>
+                      {result.intent || "—"}
+                    </strong>
                   </div>
 
                   <div>
                     <span>Payment</span>
                     <strong>
-                      {result.investigation?.paymentStatus || "—"}
+                      {result.investigation?.paymentStatus ||
+                        "—"}
                     </strong>
                   </div>
 
                   <div>
                     <span>Order</span>
                     <strong>
-                      {result.investigation?.orderStatus || "—"}
+                      {result.investigation?.orderStatus ||
+                        "—"}
                     </strong>
                   </div>
 
@@ -198,18 +279,24 @@ function App() {
 
                 </div>
               )}
+
             </div>
           )}
         </section>
 
-        {/* RIGHT */}
+        {/* RESULT */}
         <section className="panel result-panel">
 
-          <div className="section-label">RESOLUTION STATUS</div>
+          <div className="section-label">
+            RESOLUTION STATUS
+          </div>
 
-          {!result && (
+          {!result && !loading && (
             <div className="empty-state">
-              <div className="empty-icon">◎</div>
+
+              <div className="empty-icon">
+                ◎
+              </div>
 
               <h2>Ready to resolve</h2>
 
@@ -217,10 +304,28 @@ function App() {
                 Submit a customer issue and watch Resolve
                 investigate, reason, act and verify.
               </p>
+
             </div>
           )}
 
-          {result && (
+          {loading && (
+            <div className="empty-state processing-state">
+
+              <div className="processing-ring"></div>
+
+              <h2>
+                Resolve is working
+              </h2>
+
+              <p>
+                Investigating the issue and applying
+                permitted resolution policies...
+              </p>
+
+            </div>
+          )}
+
+          {result && result.finalStatus !== "ERROR" && (
             <>
               <div className="case-id">
                 {result.caseId || "CASE"}
@@ -228,9 +333,12 @@ function App() {
 
               <div
                 className={`status ${
-                  isEscalated ? "warning" : "success"
+                  isEscalated
+                    ? "warning"
+                    : "success"
                 }`}
               >
+
                 <div className="status-icon">
                   {isEscalated ? "!" : "✓"}
                 </div>
@@ -244,6 +352,7 @@ function App() {
                       : result.finalStatus}
                   </strong>
                 </div>
+
               </div>
 
               <div className="result-details">
@@ -267,13 +376,15 @@ function App() {
                 <div className="detail">
                   <span>Verification</span>
                   <strong>
-                    {result.verification?.status || "—"}
+                    {result.verification?.status ||
+                      "—"}
                   </strong>
                 </div>
 
               </div>
 
               <div className="final-message">
+
                 <span>OUTCOME</span>
 
                 <strong>
@@ -281,11 +392,20 @@ function App() {
                     ? "Human review required"
                     : "Case successfully resolved"}
                 </strong>
+
               </div>
             </>
           )}
 
+          {result?.finalStatus === "ERROR" && (
+            <div className="error-state">
+              <strong>Unable to resolve</strong>
+              <span>{result.error}</span>
+            </div>
+          )}
+
         </section>
+
       </main>
     </div>
   );
