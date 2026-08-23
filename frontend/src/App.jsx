@@ -35,6 +35,36 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(-1);
   const [showTrace, setShowTrace] = useState(true);
+  const [caseHistory, setCaseHistory] = useState([]);
+  const [selectedCaseId, setSelectedCaseId] = useState(null);
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem("resolve-case-history");
+
+      if (saved) {
+        const parsed = JSON.parse(saved);
+
+        if (Array.isArray(parsed)) {
+          setCaseHistory(parsed);
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to load session history.", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!caseHistory.length) {
+      sessionStorage.removeItem("resolve-case-history");
+      return;
+    }
+
+    sessionStorage.setItem(
+      "resolve-case-history",
+      JSON.stringify(caseHistory)
+    );
+  }, [caseHistory]);
 
   useEffect(() => {
     if (!loading) return;
@@ -82,6 +112,27 @@ function App() {
 
       setActiveStep(WORKFLOW.length);
       setResult(data);
+
+      const normalizedCase = {
+        ...data,
+        customerMessage: message,
+      };
+
+      setCaseHistory((current) => {
+        const alreadyExists = current.some(
+          (entry) => entry.caseId === normalizedCase.caseId
+        );
+
+        if (alreadyExists) {
+          return current;
+        }
+
+        return [normalizedCase, ...current];
+      });
+
+      if (data?.caseId) {
+        setSelectedCaseId(data.caseId);
+      }
     } catch (error) {
       setActiveStep(-1);
 
@@ -99,6 +150,24 @@ function App() {
 
   const isAiPowered =
     result?.aiAnalysis?.provider === "Google Gemini";
+
+  const selectedCase =
+    caseHistory.find((entry) => entry.caseId === selectedCaseId) ||
+    caseHistory[0] || null;
+
+  const resolvedCount = caseHistory.filter(
+    (entry) => entry.finalStatus === "RESOLVED"
+  ).length;
+
+  const escalatedCount = caseHistory.filter(
+    (entry) => entry.finalStatus === "ESCALATED_TO_HUMAN"
+  ).length;
+
+  const getHistoryBadgeClass = (status) => {
+    if (status === "RESOLVED") return "status-badge resolved";
+    if (status === "ESCALATED_TO_HUMAN") return "status-badge escalated";
+    return "status-badge in-progress";
+  };
 
   const getStepClass = (index) => {
     if (loading && index === activeStep) {
@@ -678,6 +747,161 @@ function App() {
         </section>
 
       </main>
+
+      <section className="case-history-panel">
+        <div className="case-history-header">
+          <div>
+            <div className="section-label">CASE HISTORY</div>
+            <h2>Case History</h2>
+            <p>Recent autonomous resolution activity</p>
+          </div>
+
+          <div className="case-history-actions">
+            <button
+              className="clear-history-button"
+              onClick={() => {
+                setCaseHistory([]);
+                setSelectedCaseId(null);
+              }}
+            >
+              Clear history
+            </button>
+          </div>
+        </div>
+
+        <div className="case-history-stats">
+          <div className="stat-card">
+            <span>Total cases</span>
+            <strong>{caseHistory.length}</strong>
+          </div>
+
+          <div className="stat-card">
+            <span>Resolved</span>
+            <strong>{resolvedCount}</strong>
+          </div>
+
+          <div className="stat-card">
+            <span>Escalated</span>
+            <strong>{escalatedCount}</strong>
+          </div>
+        </div>
+
+        <div className="history-list">
+          {caseHistory.length === 0 ? (
+            <div className="history-empty-state">
+              No recent cases yet. Resolve a customer issue to begin the session history.
+            </div>
+          ) : (
+            caseHistory.map((entry) => (
+              <article key={entry.caseId} className="history-card">
+                <div className="history-card-header">
+                  <div>
+                    <div className="history-case-id">{entry.caseId || "CASE"}</div>
+                    <div className="history-message">
+                      {entry.customerMessage || "Customer issue"}
+                    </div>
+                  </div>
+
+                  <span
+                    className={getHistoryBadgeClass(entry.finalStatus)}
+                  >
+                    {entry.finalStatus || "IN_PROGRESS"}
+                  </span>
+                </div>
+
+                <div className="history-meta-grid">
+                  <div>
+                    <span>Intent</span>
+                    <strong>{entry.intent || "—"}</strong>
+                  </div>
+
+                  <div>
+                    <span>Decision</span>
+                    <strong>{entry.policy?.decision || "—"}</strong>
+                  </div>
+
+                  <div>
+                    <span>Final status</span>
+                    <strong>{entry.finalStatus || "—"}</strong>
+                  </div>
+
+                  <div>
+                    <span>Action ref</span>
+                    <strong>{entry.action?.reference || "—"}</strong>
+                  </div>
+
+                  <div>
+                    <span>Verification</span>
+                    <strong>{entry.verification?.status || "—"}</strong>
+                  </div>
+                </div>
+
+                <button
+                  className="history-view-button"
+                  onClick={() => setSelectedCaseId(entry.caseId)}
+                >
+                  View trace
+                </button>
+              </article>
+            ))
+          )}
+        </div>
+
+        {selectedCase && (
+          <div className="history-trace-panel">
+            <div className="history-trace-header">
+              <div>
+                <span>Selected case</span>
+                <strong>{selectedCase.caseId || "CASE"}</strong>
+              </div>
+            </div>
+
+            <div className="history-trace-list">
+              <div className="history-trace-row">
+                <span>Intent identified</span>
+                <strong>{selectedCase.intent || "—"}</strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Evidence gathered</span>
+                <strong>
+                  Payment: {selectedCase.investigation?.paymentStatus || "—"} · Order: {selectedCase.investigation?.orderStatus || "—"}
+                </strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Policy evaluated</span>
+                <strong>{selectedCase.policy?.decision || "—"}</strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Policy rule</span>
+                <strong>{selectedCase.policy?.rule || "—"}</strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Action executed</span>
+                <strong>{selectedCase.action?.action || selectedCase.resolution?.action || "—"}</strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Action reference</span>
+                <strong>{selectedCase.action?.reference || "—"}</strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Outcome verified</span>
+                <strong>{selectedCase.verification?.status || "—"}</strong>
+              </div>
+
+              <div className="history-trace-row">
+                <span>Final status</span>
+                <strong>{selectedCase.finalStatus || "—"}</strong>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
