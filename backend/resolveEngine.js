@@ -9,138 +9,281 @@ function extractJson(text) {
   const end = cleaned.lastIndexOf("}");
 
   if (start !== -1 && end !== -1 && end > start) {
-    const jsonText = cleaned.slice(start, end + 1);
     try {
-      return JSON.parse(jsonText);
-    } catch (error) {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    } catch {
       return null;
     }
   }
 
   try {
     return JSON.parse(cleaned);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
 
 function normalizeCurrency(value) {
   if (typeof value === "number") return value;
+
   if (typeof value === "string") {
     const cleaned = value.replace(/[^\d.-]/g, "");
-    if (!cleaned) return 0;
-    return Number(cleaned);
+    return cleaned ? Number(cleaned) : 0;
   }
+
   return 0;
+}
+
+/*
+ * AI is responsible for UNDERSTANDING the customer.
+ * It is NOT trusted with the final business decision.
+ */
+async function analyzeWithGemini(message) {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) return null;
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash"
+    });
+
+    const prompt = `
+You are the understanding layer of an autonomous customer-resolution system.
+
+Analyze the customer message and return ONLY valid JSON.
+
+Do not decide refunds.
+Do not decide escalation.
+Do not invent real transactions.
+Do not claim access to real banking or payment systems.
+
+Your job is only to identify customer intent, category, sentiment, and extract factual clues from the message.
+
+Schema:
+
+{
+  "intent": "PAYMENT_FAILURE | DUPLICATE_PAYMENT | SUSPICIOUS_TRANSACTION | REFUND_REQUEST | GENERAL_SUPPORT",
+  "category": "PAYMENT_ISSUE | FRAUD_REVIEW | REFUND | GENERAL",
+  "sentiment": "FRUSTRATED | ALERT | CONCERNED | REQUESTING | NEUTRAL",
+  "facts": {
+    "amount": 0,
+    "mentionsFailedOrder": false,
+    "mentionsDuplicateCharge": false,
+    "mentionsUnknownTransaction": false
+  },
+  "summary": "short factual summary"
+}
+
+Customer message:
+${JSON.stringify(message)}
+`;
+
+    const result = await model.generateContent(prompt);
+    return extractJson(result.response.text());
+  } catch (error) {
+    console.warn(
+      "Gemini analysis failed; using deterministic understanding.",
+      error.message
+    );
+    return null;
+  }
 }
 
 function inferIntent(message) {
   const lower = message.toLowerCase();
 
-  if (/(charged twice|duplicate payment|double charge|charged 2 times|same order)/i.test(lower)) {
-    return { intent: "DUPLICATE_PAYMENT", category: "PAYMENT_ISSUE", sentiment: "FRUSTRATED" };
+  if (
+    /(charged twice|duplicate payment|double charge|charged 2 times|same order)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "DUPLICATE_PAYMENT",
+      category: "PAYMENT_ISSUE",
+      sentiment: "FRUSTRATED"
+    };
   }
 
-  if (/(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized)/i.test(lower)) {
-    return { intent: "SUSPICIOUS_TRANSACTION", category: "FRAUD_REVIEW", sentiment: "ALERT" };
+  if (
+    /(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "SUSPICIOUS_TRANSACTION",
+      category: "FRAUD_REVIEW",
+      sentiment: "ALERT"
+    };
   }
 
-  if (/(failed|order failed|deducted|payment failed|not delivered)/i.test(lower)) {
-    return { intent: "PAYMENT_FAILURE", category: "PAYMENT_ISSUE", sentiment: "CONCERNED" };
+  if (
+    /(failed|order failed|deducted|payment failed|not delivered)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "PAYMENT_FAILURE",
+      category: "PAYMENT_ISSUE",
+      sentiment: "CONCERNED"
+    };
   }
 
   if (/(refund|return|cancel|replacement)/i.test(lower)) {
-    return { intent: "REFUND_REQUEST", category: "REFUND", sentiment: "REQUESTING" };
+    return {
+      intent: "REFUND_REQUEST",
+      category: "REFUND",
+      sentiment: "REQUESTING"
+    };
   }
 
-  return { intent: "GENERAL_SUPPORT", category: "UNKNOWN", sentiment: "NEUTRAL" };
+  return {
+    intent: "GENERAL_SUPPORT",
+    category: "GENERAL",
+    sentiment: "NEUTRAL"
+  };
 }
 
-function simulateInvestigation(message) {
-  const amountMatch = message.match(/₹?\s?(\d+(?:,\d{3})*(?:\.\d{2})?)/i);
-  const amount = amountMatch ? normalizeCurrency(amountMatch[1]) : 0;
+function simulateInvestigation(message, aiAnalysis = null) {
+  const amountMatch = message.match(
+    /₹?\s?(\d+(?:,\d{3})*(?:\.\d{2})?)/i
+  );
+
+  const amountFromMessage = amountMatch
+    ? normalizeCurrency(amountMatch[1])
+    : 0;
+
   const lower = message.toLowerCase();
 
-  if (/(duplicate payment|charged twice|double charge|same order|2 times)/i.test(lower)) {
+  const duplicate =
+    /(duplicate payment|charged twice|double charge|same order|2 times)/i.test(
+      lower
+    );
+
+  const suspicious =
+    /(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized)/i.test(
+      lower
+    );
+
+  const failed =
+    /(failed|order failed|payment failed|not delivered)/i.test(lower);
+
+  const amount =
+    amountFromMessage ||
+    normalizeCurrency(aiAnalysis?.facts?.amount || 0);
+
+  if (duplicate) {
     return {
       paymentStatus: "CAPTURED",
       orderStatus: "FAILED",
       duplicateDetected: true,
       chargeCount: 2,
-      amount
+      suspicious: false,
+      amount,
+      evidenceSource: "Simulated transaction evidence"
     };
   }
 
-  if (/(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized)/i.test(lower)) {
+  if (suspicious) {
     return {
       paymentStatus: "CAPTURED",
       orderStatus: "UNKNOWN",
       duplicateDetected: false,
-      suspicious: true,
       chargeCount: 1,
-      amount
+      suspicious: true,
+      amount,
+      evidenceSource: "Simulated transaction evidence"
+    };
+  }
+
+  if (failed) {
+    return {
+      paymentStatus: "CAPTURED",
+      orderStatus: "FAILED",
+      duplicateDetected: false,
+      chargeCount: 1,
+      suspicious: false,
+      amount,
+      evidenceSource: "Simulated transaction evidence"
     };
   }
 
   return {
-    paymentStatus: "CAPTURED",
-    orderStatus: "FAILED",
+    paymentStatus: "UNKNOWN",
+    orderStatus: "UNKNOWN",
     duplicateDetected: false,
+    chargeCount: 0,
     suspicious: false,
-    chargeCount: 1,
-    amount
+    amount,
+    evidenceSource: "Insufficient simulated transaction evidence"
   };
 }
 
+/*
+ * IMPORTANT:
+ * This is the trusted business-policy layer.
+ * Gemini cannot override these rules.
+ */
 function evaluatePolicy(investigation, intent) {
   const payment = investigation.paymentStatus;
   const order = investigation.orderStatus;
   const duplicate = !!investigation.duplicateDetected;
   const suspicious = !!investigation.suspicious;
 
-  if (suspicious) {
+  if (suspicious || intent === "SUSPICIOUS_TRANSACTION") {
     return {
       isEligible: false,
-      rule: "IF suspicious transaction THEN escalate for human review",
+      rule:
+        "IF suspicious transaction THEN escalate for human review",
       decision: "ESCALATE",
-      message: "High-risk transaction requires manual verification before any refund or replacement."
+      message:
+        "High-risk transaction requires manual verification before any automated financial action."
     };
   }
 
-  if (duplicate) {
+  if (duplicate && payment === "CAPTURED") {
     return {
       isEligible: true,
-      rule: "IF duplicate charge AND same order THEN refund one charge",
+      rule:
+        "IF duplicate charge AND payment = CAPTURED THEN refund one duplicate charge",
       decision: "REFUND_ONE_CHARGE",
-      message: "Duplicate payment identified; refund one duplicate charge after validation."
+      message:
+        "Duplicate payment identified; refund one duplicate charge after validation."
     };
   }
 
   if (payment === "CAPTURED" && order === "FAILED") {
     return {
       isEligible: true,
-      rule: "IF payment = CAPTURED AND order = FAILED THEN refund eligible",
+      rule:
+        "IF payment = CAPTURED AND order = FAILED THEN refund eligible",
       decision: "REFUND",
-      message: "Captured payment with failed order qualifies for refund."
+      message:
+        "Captured payment with failed order qualifies for refund."
     };
   }
 
   return {
     isEligible: false,
-    rule: "DEFAULT: collect more evidence or escalate",
+    rule:
+      "DEFAULT: collect more evidence or escalate",
     decision: "INFORMATION",
-    message: "Insufficient evidence to approve an automated action."
+    message:
+      "Insufficient evidence to approve an automated financial action."
   };
 }
 
-function determineResolution(policy, investigation) {
+function determineResolution(policy) {
   const { decision, isEligible } = policy;
 
   if (decision === "ESCALATE") {
     return {
       type: "ESCALATE",
       action: "HUMAN_ESCALATION",
-      summary: "Escalated to human review due to suspicious transaction risk."
+      summary:
+        "Escalated to human review due to suspicious transaction risk."
     };
   }
 
@@ -148,7 +291,8 @@ function determineResolution(policy, investigation) {
     return {
       type: "REFUND",
       action: "REFUND_ONE_CHARGE",
-      summary: "Initiated refund for the duplicate charge only."
+      summary:
+        "Initiated refund for the duplicate charge only."
     };
   }
 
@@ -156,74 +300,99 @@ function determineResolution(policy, investigation) {
     return {
       type: "REFUND",
       action: "REFUND_FULL",
-      summary: "Initiated refund for the failed order payment."
-    };
-  }
-
-  if (decision === "INFORMATION") {
-    return {
-      type: "INFORMATION",
-      action: "REQUEST_MORE_DETAILS",
-      summary: "Need more evidence before deciding the action."
+      summary:
+        "Initiated refund for the failed order payment."
     };
   }
 
   return {
-    type: "RETRY",
-    action: "RETRY_ORDER",
-    summary: "System is retrying the order workflow."
+    type: "INFORMATION",
+    action: "REQUEST_MORE_DETAILS",
+    summary:
+      "Need more evidence before deciding the action."
   };
 }
 
 function buildActionRecord(resolution, investigation) {
-  const refundAmount = resolution.type === "REFUND" ? investigation.amount || 0 : 0;
+  const refundAmount =
+    resolution.type === "REFUND"
+      ? investigation.amount || 0
+      : 0;
 
   if (resolution.type === "ESCALATE") {
     return {
       action: "Escalation request opened",
-      reference: `ESC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      reference: `ESC-${Math.random()
+        .toString(36)
+        .slice(2, 8)
+        .toUpperCase()}`,
       amount: 0,
       status: "PENDING_REVIEW",
-      note: "High-risk transaction paused for manual investigation."
+      note:
+        "High-risk transaction paused for manual investigation."
     };
   }
 
   if (resolution.type === "REFUND") {
     return {
       action: "Refund request created",
-      reference: `RF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      reference: `RF-${Math.random()
+        .toString(36)
+        .slice(2, 8)
+        .toUpperCase()}`,
       amount: refundAmount,
       status: "INITIATED",
-      note: `Refund amount: ₹${refundAmount}`
+      note: `Simulated refund amount: ₹${refundAmount}`
     };
   }
 
   return {
     action: "Information request sent",
-    reference: `INFO-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+    reference: `INFO-${Math.random()
+      .toString(36)
+      .slice(2, 8)
+      .toUpperCase()}`,
     amount: 0,
     status: "REQUESTED",
-    note: "Customer asked to provide more clarifying information."
+    note:
+      "Customer asked to provide more clarifying information."
   };
 }
 
 function verifyAction(actionRecord, resolution) {
-  if (actionRecord.status === "INITIATED" || actionRecord.status === "PENDING_REVIEW") {
+  if (
+    actionRecord.status === "INITIATED" ||
+    actionRecord.status === "PENDING_REVIEW"
+  ) {
     return {
-      expectedState: "Action initiated and tracked",
+      expectedState:
+        "Action initiated and tracked",
       status: "VERIFIED",
-      finalStatus: resolution.type === "ESCALATE" ? "ESCALATED_TO_HUMAN" : "RESOLVED"
+      finalStatus:
+        resolution.type === "ESCALATE"
+          ? "ESCALATED_TO_HUMAN"
+          : "RESOLVED"
     };
   }
 
   return {
-    expectedState: "Action queued for follow-up",
+    expectedState:
+      "Action queued for follow-up",
     status: "PENDING",
     finalStatus: "IN_PROGRESS"
   };
 }
 
-function buildAuditTrail(caseId, intent, investigation, policy, resolution, action, verification, finalStatus) {
+function buildAuditTrail(
+  caseId,
+  intent,
+  investigation,
+  policy,
+  resolution,
+  action,
+  verification,
+  finalStatus
+) {
   return {
     caseId,
     intent,
@@ -234,164 +403,166 @@ function buildAuditTrail(caseId, intent, investigation, policy, resolution, acti
       note: policy.message
     },
     decision: resolution.summary,
-    action: action,
+    action,
     verification,
     finalStatus
   };
 }
 
-async function callGemini(message) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return null;
-  }
+function buildResult(
+  message,
+  analysis,
+  intent,
+  investigation
+) {
+  const policy = evaluatePolicy(
+    investigation,
+    intent.intent
+  );
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    const prompt = `
-      You are Resolve AI orchestrator. Output valid JSON only with keys:
-      intent, category, sentiment, investigation, policy, resolution, action, verification, finalStatus.
-      User message: "${message}"
-      Use this JSON schema exactly:
-      {
-        "intent": "STRING",
-        "category": "STRING",
-        "sentiment": "STRING",
-        "investigation": {
-          "paymentStatus": "CAPTURED|PENDING|FAILED|DECLINED",
-          "orderStatus": "FAILED|SUCCESS|PENDING|UNKNOWN",
-          "amount": 0,
-          "duplicateDetected": false,
-          "suspicious": false,
-          "chargeCount": 1
-        },
-        "policy": {
-          "decision": "REFUND|REFUND_ONE_CHARGE|ESCALATE|INFORMATION",
-          "rule": "STRING",
-          "message": "STRING"
-        },
-        "resolution": { "type": "REFUND|ESCALATE|INFORMATION|RETRY", "action": "STRING", "summary": "STRING" },
-        "action": { "action": "STRING", "reference": "STRING", "amount": 0, "status": "INITIATED|PENDING_REVIEW|REQUESTED", "note": "STRING" },
-        "verification": { "expectedState": "STRING", "status": "VERIFIED|PENDING", "finalStatus": "RESOLVED|ESCALATED_TO_HUMAN|IN_PROGRESS" },
-        "finalStatus": "RESOLVED|ESCALATED_TO_HUMAN|IN_PROGRESS"
-      }
-      If you cannot determine a value, use a safe simulated fallback.
-    `;
+  const resolution =
+    determineResolution(policy);
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    return extractJson(text);
-  } catch (error) {
-    console.warn("Gemini call failed, using simulated fallback.", error.message);
-    return null;
-  }
-}
+  const action =
+    buildActionRecord(
+      resolution,
+      investigation
+    );
 
-function createFallbackResponse(message, reason = "AI processing failed") {
-  const intent = inferIntent(message);
-  const investigation = simulateInvestigation(message);
-  const policy = evaluatePolicy(investigation, intent);
-  const resolution = determineResolution(policy, investigation);
-  const action = buildActionRecord(resolution, investigation);
-  const verification = verifyAction(action, resolution);
-  const finalStatus = verification.finalStatus || "IN_PROGRESS";
-  const caseId = `RF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  const verification =
+    verifyAction(
+      action,
+      resolution
+    );
+
+  const caseId = `RF-${Math.random()
+    .toString(36)
+    .slice(2, 8)
+    .toUpperCase()}`;
+
+  const finalStatus =
+    verification.finalStatus || "IN_PROGRESS";
 
   return {
     caseId,
+
     intent: intent.intent,
+
     category: intent.category,
+
     sentiment: intent.sentiment,
+
+    summary:
+      analysis?.summary ||
+      `${intent.intent} identified from customer message.`,
+
     investigation,
+
     policy: {
       rule: policy.rule,
       decision: policy.decision,
       message: policy.message
     },
+
     resolution,
+
     action,
+
     verification,
+
     finalStatus,
-    auditTrail: buildAuditTrail(caseId, intent.intent, investigation, policy, resolution, action, verification, finalStatus),
-    warnings: [`Simulated fallback used because: ${reason}`]
+
+    aiAnalysis: analysis
+      ? {
+          provider: "Google Gemini",
+          role: "Customer understanding",
+          summary:
+            analysis.summary || null
+        }
+      : {
+          provider: "Deterministic fallback",
+          role: "Customer understanding"
+        },
+
+    auditTrail: buildAuditTrail(
+      caseId,
+      intent.intent,
+      investigation,
+      policy,
+      resolution,
+      action,
+      verification,
+      finalStatus
+    )
   };
 }
 
 async function resolveCase(message) {
-  const caseId = `RF-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
-  const aiPayload = await callGemini(message);
+  const aiAnalysis =
+    await analyzeWithGemini(message);
 
-  if (aiPayload) {
-    const result = {
-      caseId,
-      intent: aiPayload.intent || inferIntent(message).intent,
-      category: aiPayload.category || inferIntent(message).category,
-      sentiment: aiPayload.sentiment || inferIntent(message).sentiment,
-      investigation: aiPayload.investigation || simulateInvestigation(message),
-      policy: aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-      resolution: aiPayload.resolution || determineResolution(
-        aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-        aiPayload.investigation || simulateInvestigation(message)
-      ),
-      action: aiPayload.action || buildActionRecord(
-        aiPayload.resolution || determineResolution(
-          aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-          aiPayload.investigation || simulateInvestigation(message)
-        ),
-        aiPayload.investigation || simulateInvestigation(message)
-      ),
-      verification: aiPayload.verification || verifyAction(
-        aiPayload.action || buildActionRecord(
-          aiPayload.resolution || determineResolution(
-            aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-            aiPayload.investigation || simulateInvestigation(message)
-          ),
-          aiPayload.investigation || simulateInvestigation(message)
-        ),
-        aiPayload.resolution || determineResolution(
-          aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-          aiPayload.investigation || simulateInvestigation(message)
-        )
-      ),
-      finalStatus: aiPayload.finalStatus || "IN_PROGRESS",
-      auditTrail: aiPayload.auditTrail || buildAuditTrail(
-        caseId,
-        aiPayload.intent || inferIntent(message).intent,
-        aiPayload.investigation || simulateInvestigation(message),
-        aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-        aiPayload.resolution || determineResolution(
-          aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-          aiPayload.investigation || simulateInvestigation(message)
-        ),
-        aiPayload.action || buildActionRecord(
-          aiPayload.resolution || determineResolution(
-            aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-            aiPayload.investigation || simulateInvestigation(message)
-          ),
-          aiPayload.investigation || simulateInvestigation(message)
-        ),
-        aiPayload.verification || verifyAction(
-          aiPayload.action || buildActionRecord(
-            aiPayload.resolution || determineResolution(
-              aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-              aiPayload.investigation || simulateInvestigation(message)
-            ),
-            aiPayload.investigation || simulateInvestigation(message)
-          ),
-          aiPayload.resolution || determineResolution(
-            aiPayload.policy || evaluatePolicy(simulateInvestigation(message), inferIntent(message)),
-            aiPayload.investigation || simulateInvestigation(message)
-          )
-        ),
-        aiPayload.finalStatus || "IN_PROGRESS"
-      )
-    };
+  const deterministicIntent =
+    inferIntent(message);
 
-    return result;
-  }
+  /*
+   * Gemini enriches understanding,
+   * but deterministic signals remain
+   * the safety fallback.
+   */
+  const intent = {
+    intent:
+      aiAnalysis?.intent ||
+      deterministicIntent.intent,
 
-  return createFallbackResponse(message);
+    category:
+      aiAnalysis?.category ||
+      deterministicIntent.category,
+
+    sentiment:
+      aiAnalysis?.sentiment ||
+      deterministicIntent.sentiment
+  };
+
+  const investigation =
+    simulateInvestigation(
+      message,
+      aiAnalysis
+    );
+
+  /*
+   * FINAL POLICY IS ALWAYS DETERMINISTIC.
+   */
+  return buildResult(
+    message,
+    aiAnalysis,
+    intent,
+    investigation
+  );
+}
+
+function createFallbackResponse(
+  message,
+  reason = "AI processing failed"
+) {
+  const intent =
+    inferIntent(message);
+
+  const investigation =
+    simulateInvestigation(message);
+
+  const result =
+    buildResult(
+      message,
+      null,
+      intent,
+      investigation
+    );
+
+  result.warnings = [
+    `Deterministic fallback used because: ${reason}`
+  ];
+
+  return result;
 }
 
 module.exports = {
