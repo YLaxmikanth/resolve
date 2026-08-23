@@ -719,9 +719,11 @@ function App() {
                   </span>
 
                   <strong>
-                    {isEscalated
-                      ? "Human review required"
-                      : "Case successfully resolved"}
+                    {result.finalStatus === "RESOLVED"
+                      ? "Case successfully resolved"
+                      : result.finalStatus === "ESCALATED_TO_HUMAN"
+                        ? "Human review required"
+                        : "Waiting for additional information"}
                   </strong>
 
                 </div>
