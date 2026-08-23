@@ -92,7 +92,7 @@ function App() {
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/resolve",
+        `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api/resolve`,
         {
           method: "POST",
           headers: {
