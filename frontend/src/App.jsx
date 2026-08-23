@@ -17,7 +17,7 @@ const WORKFLOW = [
   },
   {
     name: "REASON",
-    description: "Apply knowledge & policy",
+    description: "Apply business policy",
   },
   {
     name: "ACT",
@@ -34,7 +34,7 @@ function App() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(-1);
-  const [showEvidence, setShowEvidence] = useState(true);
+  const [showTrace, setShowTrace] = useState(true);
 
   useEffect(() => {
     if (!loading) return;
@@ -61,18 +61,23 @@ function App() {
     setResult(null);
 
     try {
-      const response = await fetch("http://localhost:5000/api/resolve", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message }),
-      });
+      const response = await fetch(
+        "http://localhost:5000/api/resolve",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message }),
+        }
+      );
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Unable to resolve case");
+        throw new Error(
+          data.error || "Unable to resolve case"
+        );
       }
 
       setActiveStep(WORKFLOW.length);
@@ -92,28 +97,8 @@ function App() {
   const isEscalated =
     result?.finalStatus === "ESCALATED_TO_HUMAN";
 
-  const decisionTrace = [
-    {
-      label: "Intent identified",
-      value: result?.intent || "—",
-    },
-    {
-      label: "Evidence gathered",
-      value: `Payment: ${result?.investigation?.paymentStatus || "—"} · Order: ${result?.investigation?.orderStatus || "—"}`,
-    },
-    {
-      label: "Policy evaluated",
-      value: result?.policy?.decision || "—",
-    },
-    {
-      label: "Action executed",
-      value: result?.action?.action || result?.resolution?.action || "—",
-    },
-    {
-      label: "Outcome verified",
-      value: result?.verification?.status || "—",
-    },
-  ];
+  const isAiPowered =
+    result?.aiAnalysis?.provider === "Google Gemini";
 
   const getStepClass = (index) => {
     if (loading && index === activeStep) {
@@ -134,6 +119,7 @@ function App() {
       <header className="topbar">
         <div>
           <div className="brand">Resolve</div>
+
           <div className="tagline">
             Autonomous customer resolution
           </div>
@@ -149,6 +135,7 @@ function App() {
 
         {/* CUSTOMER ISSUE */}
         <section className="panel input-panel">
+
           <div className="section-label">
             CUSTOMER ISSUE
           </div>
@@ -157,7 +144,9 @@ function App() {
 
           <textarea
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) =>
+              setMessage(e.target.value)
+            }
             placeholder="Describe the customer's problem..."
             disabled={loading}
           />
@@ -184,12 +173,16 @@ function App() {
             onClick={resolveCase}
             disabled={loading}
           >
-            {loading ? "Resolve is working..." : "Resolve Case →"}
+            {loading
+              ? "Resolve is working..."
+              : "Resolve Case →"}
           </button>
+
         </section>
 
-        {/* WORKFLOW */}
+        {/* AI ORCHESTRATION */}
         <section className="panel workflow-panel">
+
           <div className="section-label">
             AI ORCHESTRATION
           </div>
@@ -197,18 +190,28 @@ function App() {
           <h2>Resolution workflow</h2>
 
           <div className="workflow">
+
             {WORKFLOW.map((step, index) => (
-              <div className="workflow-item" key={step.name}>
+              <div
+                className="workflow-item"
+                key={step.name}
+              >
 
                 <div
-                  className={`workflow-node ${getStepClass(index)}`}
+                  className={`workflow-node ${getStepClass(
+                    index
+                  )}`}
                 >
-                  {result && index < activeStep ? "✓" : index + 1}
+                  {result && index < activeStep
+                    ? "✓"
+                    : index + 1}
                 </div>
 
                 <div className="workflow-text">
                   <strong>{step.name}</strong>
-                  <span>{step.description}</span>
+                  <span>
+                    {step.description}
+                  </span>
                 </div>
 
                 {index < WORKFLOW.length - 1 && (
@@ -220,24 +223,33 @@ function App() {
                     }`}
                   />
                 )}
+
               </div>
             ))}
+
           </div>
 
           {/* ORCHESTRATOR */}
           <div className="agent-box">
 
             <div className="agent-header">
+
               <div>
-                <strong>AI Orchestrator</strong>
+                <strong>
+                  AI Orchestrator
+                </strong>
+
                 <span>
                   Specialized agents coordinated
                 </span>
               </div>
 
               <div className="active-badge">
-                {loading ? "PROCESSING" : "READY"}
+                {loading
+                  ? "PROCESSING"
+                  : "READY"}
               </div>
+
             </div>
 
             <div className="agent-grid">
@@ -251,44 +263,218 @@ function App() {
 
           </div>
 
+          {/* AI UNDERSTANDING */}
+          {result &&
+            result.finalStatus !== "ERROR" && (
+              <div className="ai-insight">
+
+                <div className="ai-insight-header">
+
+                  <div>
+                    <strong>
+                      AI understanding
+                    </strong>
+
+                    <span>
+                      Customer message analysis
+                    </span>
+                  </div>
+
+                  <div
+                    className={`ai-badge ${
+                      isAiPowered
+                        ? "ai"
+                        : "fallback"
+                    }`}
+                  >
+                    {isAiPowered
+                      ? "GEMINI"
+                      : "FALLBACK"}
+                  </div>
+
+                </div>
+
+                <p>
+                  {result.summary ||
+                    result.aiAnalysis?.summary ||
+                    "Customer issue analyzed."}
+                </p>
+
+                <div className="ai-facts">
+
+                  <div>
+                    <span>Intent</span>
+                    <strong>
+                      {result.intent || "—"}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>Category</span>
+                    <strong>
+                      {result.category || "—"}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>Sentiment</span>
+                    <strong>
+                      {result.sentiment || "—"}
+                    </strong>
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
           {/* DECISION TRACE */}
-          {result && result.finalStatus !== "ERROR" && (
-            <div className="evidence decision-trace">
-              <button
-                onClick={() => setShowEvidence((value) => !value)}
-                className="evidence-header"
-              >
-                <div>
-                  <strong>Decision trace</strong>
-                  <span>Evidence behind the resolution</span>
-                </div>
-                <span>{showEvidence ? "−" : "+"}</span>
-              </button>
+          {result &&
+            result.finalStatus !== "ERROR" && (
+              <div className="decision-trace">
 
-              {showEvidence && (
-                <div className="evidence-body">
+                <button
+                  className="trace-toggle"
+                  onClick={() =>
+                    setShowTrace(
+                      (value) => !value
+                    )
+                  }
+                >
+                  <div>
+                    <strong>
+                      Decision trace
+                    </strong>
+
+                    <span>
+                      Why Resolve made this decision
+                    </span>
+                  </div>
+
+                  <span>
+                    {showTrace ? "−" : "+"}
+                  </span>
+                </button>
+
+                {showTrace && (
                   <div className="trace-list">
-                    {decisionTrace.map((stage, index) => (
-                      <div key={stage.label} className="trace-item">
-                        <div className="trace-number">{index + 1}</div>
-                        <div className="trace-content">
-                          <div className="trace-label">{stage.label}</div>
-                          <div className="trace-value">{stage.value}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
 
-                  <div className="policy-rule-box">
-                    <div className="policy-rule-label">POLICY RULE</div>
-                    <div className="policy-rule-text">
-                      {result?.policy?.rule || "—"}
+                    <div className="trace-item">
+                      <div className="trace-icon">
+                        1
+                      </div>
+
+                      <div>
+                        <strong>
+                          Intent identified
+                        </strong>
+
+                        <span>
+                          {result.intent ||
+                            "Issue classified"}
+                        </span>
+                      </div>
                     </div>
+
+                    <div className="trace-item">
+                      <div className="trace-icon">
+                        2
+                      </div>
+
+                      <div>
+                        <strong>
+                          Evidence gathered
+                        </strong>
+
+                        <span>
+                          Payment:{" "}
+                          {result.investigation
+                            ?.paymentStatus ||
+                            "UNKNOWN"}
+                          {" · "}
+                          Order:{" "}
+                          {result.investigation
+                            ?.orderStatus ||
+                            "UNKNOWN"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="trace-item">
+                      <div className="trace-icon">
+                        3
+                      </div>
+
+                      <div>
+                        <strong>
+                          Policy evaluated
+                        </strong>
+
+                        <span>
+                          {result.policy
+                            ?.decision ||
+                            "INFORMATION"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="trace-item">
+                      <div className="trace-icon">
+                        4
+                      </div>
+
+                      <div>
+                        <strong>
+                          Action executed
+                        </strong>
+
+                        <span>
+                          {result.action
+                            ?.action ||
+                            result.resolution
+                              ?.action ||
+                            "No automated action"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="trace-item">
+                      <div className="trace-icon">
+                        5
+                      </div>
+
+                      <div>
+                        <strong>
+                          Outcome verified
+                        </strong>
+
+                        <span>
+                          {result.verification
+                            ?.status ||
+                            "PENDING"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="trace-rule">
+
+                      <span>
+                        POLICY RULE
+                      </span>
+
+                      <strong>
+                        {result.policy?.rule ||
+                          "Default evidence policy"}
+                      </strong>
+
+                    </div>
+
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+
+              </div>
+            )}
+
         </section>
 
         {/* RESULT */}
@@ -305,11 +491,14 @@ function App() {
                 ◎
               </div>
 
-              <h2>Ready to resolve</h2>
+              <h2>
+                Ready to resolve
+              </h2>
 
               <p>
-                Submit a customer issue and watch Resolve
-                investigate, reason, act and verify.
+                Submit a customer issue and watch
+                Resolve investigate, reason, act
+                and verify.
               </p>
 
             </div>
@@ -325,89 +514,164 @@ function App() {
               </h2>
 
               <p>
-                Investigating the issue and applying
-                permitted resolution policies...
+                Understanding the issue,
+                investigating evidence and
+                applying permitted policies...
               </p>
 
             </div>
           )}
 
-          {result && result.finalStatus !== "ERROR" && (
-            <>
-              <div className="case-id">
-                {result.caseId || "CASE"}
-              </div>
+          {result &&
+            result.finalStatus !== "ERROR" && (
+              <>
 
-              <div
-                className={`status ${
-                  isEscalated
-                    ? "warning"
-                    : "success"
-                }`}
-              >
-
-                <div className="status-icon">
-                  {isEscalated ? "!" : "✓"}
+                <div className="case-id">
+                  {result.caseId || "CASE"}
                 </div>
 
-                <div>
-                  <span>FINAL STATUS</span>
+                <div
+                  className={`status ${
+                    isEscalated
+                      ? "warning"
+                      : "success"
+                  }`}
+                >
+
+                  <div className="status-icon">
+                    {isEscalated
+                      ? "!"
+                      : "✓"}
+                  </div>
+
+                  <div>
+                    <span>
+                      FINAL STATUS
+                    </span>
+
+                    <strong>
+                      {isEscalated
+                        ? "ESCALATED"
+                        : result.finalStatus}
+                    </strong>
+                  </div>
+
+                </div>
+
+                <div className="result-details">
+
+                  <div className="detail">
+                    <span>
+                      Decision
+                    </span>
+
+                    <strong>
+                      {result.policy
+                        ?.decision ||
+                        "—"}
+                    </strong>
+                  </div>
+
+                  <div className="detail">
+                    <span>
+                      Action
+                    </span>
+
+                    <strong>
+                      {result.action
+                        ?.action ||
+                        result.resolution
+                          ?.action ||
+                        "—"}
+                    </strong>
+                  </div>
+
+                  <div className="detail">
+                    <span>
+                      Verification
+                    </span>
+
+                    <strong>
+                      {result.verification
+                        ?.status ||
+                        "—"}
+                    </strong>
+                  </div>
+
+                </div>
+
+                {/* ACTION DETAILS */}
+                <div className="action-card">
+
+                  <div>
+                    <span>
+                      ACTION REFERENCE
+                    </span>
+
+                    <strong>
+                      {result.action
+                        ?.reference ||
+                        "—"}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>
+                      ACTION STATUS
+                    </span>
+
+                    <strong>
+                      {result.action
+                        ?.status ||
+                        "—"}
+                    </strong>
+                  </div>
+
+                  {result.action
+                    ?.amount > 0 && (
+                    <div>
+                      <span>
+                        SIMULATED AMOUNT
+                      </span>
+
+                      <strong>
+                        ₹
+                        {result.action.amount}
+                      </strong>
+                    </div>
+                  )}
+
+                </div>
+
+                <div className="final-message">
+
+                  <span>
+                    OUTCOME
+                  </span>
 
                   <strong>
                     {isEscalated
-                      ? "ESCALATED"
-                      : result.finalStatus}
+                      ? "Human review required"
+                      : "Case successfully resolved"}
                   </strong>
+
                 </div>
 
-              </div>
+              </>
+            )}
 
-              <div className="result-details">
-
-                <div className="detail">
-                  <span>Decision</span>
-                  <strong>
-                    {result.policy?.decision || "—"}
-                  </strong>
-                </div>
-
-                <div className="detail">
-                  <span>Action</span>
-                  <strong>
-                    {result.action?.action ||
-                      result.resolution?.action ||
-                      "—"}
-                  </strong>
-                </div>
-
-                <div className="detail">
-                  <span>Verification</span>
-                  <strong>
-                    {result.verification?.status ||
-                      "—"}
-                  </strong>
-                </div>
-
-              </div>
-
-              <div className="final-message">
-
-                <span>OUTCOME</span>
-
-                <strong>
-                  {isEscalated
-                    ? "Human review required"
-                    : "Case successfully resolved"}
-                </strong>
-
-              </div>
-            </>
-          )}
-
-          {result?.finalStatus === "ERROR" && (
+          {result?.finalStatus ===
+            "ERROR" && (
             <div className="error-state">
-              <strong>Unable to resolve</strong>
-              <span>{result.error}</span>
+
+              <strong>
+                Unable to resolve
+              </strong>
+
+              <span>
+                {result.error}
+              </span>
+
             </div>
           )}
 
