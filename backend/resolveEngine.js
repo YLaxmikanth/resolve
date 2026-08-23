@@ -1,5 +1,4 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { v4: uuidv4 } = require("uuid");
 
 function extractJson(text) {
   if (!text || typeof text !== "string") return null;
@@ -34,10 +33,6 @@ function normalizeCurrency(value) {
   return 0;
 }
 
-/*
- * AI is responsible for UNDERSTANDING the customer.
- * It is NOT trusted with the final business decision.
- */
 async function analyzeWithGemini(message) {
   const apiKey = process.env.GEMINI_API_KEY;
 
@@ -45,7 +40,6 @@ async function analyzeWithGemini(message) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash"
     });
@@ -62,17 +56,25 @@ Do not claim access to real banking or payment systems.
 
 Your job is only to identify customer intent, category, sentiment, and extract factual clues from the message.
 
-Schema:
+Supported intent values:
+PAYMENT_FAILURE | DUPLICATE_PAYMENT | SUSPICIOUS_TRANSACTION | REFUND_REQUEST | GENERAL_SUPPORT | PAYMENT_PENDING | ORDER_NOT_RECEIVED | ORDER_CANCELLATION | REFUND_STATUS | WRONG_AMOUNT_CHARGED | ACCOUNT_ACCESS | UNKNOWN_ISSUE
 
+Schema:
 {
-  "intent": "PAYMENT_FAILURE | DUPLICATE_PAYMENT | SUSPICIOUS_TRANSACTION | REFUND_REQUEST | GENERAL_SUPPORT",
-  "category": "PAYMENT_ISSUE | FRAUD_REVIEW | REFUND | GENERAL",
-  "sentiment": "FRUSTRATED | ALERT | CONCERNED | REQUESTING | NEUTRAL",
+  "intent": "STRING",
+  "category": "STRING",
+  "sentiment": "STRING",
   "facts": {
     "amount": 0,
     "mentionsFailedOrder": false,
     "mentionsDuplicateCharge": false,
-    "mentionsUnknownTransaction": false
+    "mentionsUnknownTransaction": false,
+    "paymentPending": false,
+    "orderNotReceived": false,
+    "cancellationRequested": false,
+    "refundStatusRequested": false,
+    "wrongAmount": false,
+    "accountAccessIssue": false
   },
   "summary": "short factual summary"
 }
@@ -108,7 +110,7 @@ function inferIntent(message) {
   }
 
   if (
-    /(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized)/i.test(
+    /(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized|charged my card and i don't recognize it)/i.test(
       lower
     )
   ) {
@@ -116,6 +118,78 @@ function inferIntent(message) {
       intent: "SUSPICIOUS_TRANSACTION",
       category: "FRAUD_REVIEW",
       sentiment: "ALERT"
+    };
+  }
+
+  if (
+    /(still pending|payment is pending|pending payment|payment pending|not yet cleared)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "PAYMENT_PENDING",
+      category: "PAYMENT_ISSUE",
+      sentiment: "CONCERNED"
+    };
+  }
+
+  if (
+    /(never arrived|not received|did not receive|order never arrived|missing order|never got my order)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "ORDER_NOT_RECEIVED",
+      category: "DELIVERY_ISSUE",
+      sentiment: "CONCERNED"
+    };
+  }
+
+  if (
+    /(cancel my order|want to cancel|cancel order|i want to cancel|cancel purchase)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "ORDER_CANCELLATION",
+      category: "ORDER_MANAGEMENT",
+      sentiment: "REQUESTING"
+    };
+  }
+
+  if (
+    /(refund status|where is my refund|track refund|refund update|check refund)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "REFUND_STATUS",
+      category: "REFUND",
+      sentiment: "REQUESTING"
+    };
+  }
+
+  if (
+    /(wrong amount|charged too much|incorrect amount|extra charge|not the right amount|higher than expected)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "WRONG_AMOUNT_CHARGED",
+      category: "PAYMENT_ISSUE",
+      sentiment: "CONCERNED"
+    };
+  }
+
+  if (
+    /(can't access account|cannot access account|unable to access|login issue|account access)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "ACCOUNT_ACCESS",
+      category: "ACCOUNT_ISSUE",
+      sentiment: "CONCERNED"
     };
   }
 
@@ -131,11 +205,23 @@ function inferIntent(message) {
     };
   }
 
-  if (/(refund|return|cancel|replacement)/i.test(lower)) {
+  if (/(refund|return|replacement)/i.test(lower)) {
     return {
       intent: "REFUND_REQUEST",
       category: "REFUND",
       sentiment: "REQUESTING"
+    };
+  }
+
+  if (
+    /(don't know what happened|unknown issue|i don't know|what happened|no idea)/i.test(
+      lower
+    )
+  ) {
+    return {
+      intent: "UNKNOWN_ISSUE",
+      category: "GENERAL",
+      sentiment: "NEUTRAL"
     };
   }
 
@@ -163,12 +249,44 @@ function simulateInvestigation(message, aiAnalysis = null) {
     );
 
   const suspicious =
-    /(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized)/i.test(
+    /(don't recognize|not recognize|unknown transaction|suspicious|fraud|unrecognized|charged my card and i don't recognize it)/i.test(
       lower
     );
 
   const failed =
     /(failed|order failed|payment failed|not delivered)/i.test(lower);
+
+  const pendingPayment =
+    /(still pending|payment is pending|pending payment|payment pending|not yet cleared)/i.test(
+      lower
+    );
+
+  const orderNotReceived =
+    /(never arrived|not received|did not receive|order never arrived|missing order|never got my order)/i.test(
+      lower
+    );
+
+  const cancellationRequested =
+    /(cancel my order|want to cancel|cancel order|i want to cancel|cancel purchase)/i.test(
+      lower
+    );
+
+  const refundStatusRequested =
+    /(refund status|where is my refund|track refund|refund update|check refund)/i.test(
+      lower
+    );
+
+  const wrongAmount =
+    /(wrong amount|charged too much|incorrect amount|extra charge|not the right amount|higher than expected)/i.test(
+      lower
+    );
+
+  const accountAccessIssue =
+    /(can't access account|cannot access account|unable to access|login issue|account access)/i.test(
+      lower
+    );
+
+  const refundRequested = /(refund|return|replacement)/i.test(lower);
 
   const amount =
     amountFromMessage ||
@@ -182,6 +300,13 @@ function simulateInvestigation(message, aiAnalysis = null) {
       chargeCount: 2,
       suspicious: false,
       amount,
+      refundRequested,
+      cancellationRequested,
+      pendingPayment,
+      orderNotReceived,
+      refundStatusRequested,
+      wrongAmount,
+      accountAccessIssue,
       evidenceSource: "Simulated transaction evidence"
     };
   }
@@ -194,6 +319,70 @@ function simulateInvestigation(message, aiAnalysis = null) {
       chargeCount: 1,
       suspicious: true,
       amount,
+      refundRequested,
+      cancellationRequested,
+      pendingPayment,
+      orderNotReceived,
+      refundStatusRequested,
+      wrongAmount,
+      accountAccessIssue,
+      evidenceSource: "Simulated transaction evidence"
+    };
+  }
+
+  if (pendingPayment) {
+    return {
+      paymentStatus: "PENDING",
+      orderStatus: "PENDING",
+      duplicateDetected: false,
+      chargeCount: 1,
+      suspicious: false,
+      amount,
+      refundRequested,
+      cancellationRequested,
+      pendingPayment: true,
+      orderNotReceived,
+      refundStatusRequested,
+      wrongAmount,
+      accountAccessIssue,
+      evidenceSource: "Simulated transaction evidence"
+    };
+  }
+
+  if (orderNotReceived) {
+    return {
+      paymentStatus: "CAPTURED",
+      orderStatus: "NOT_RECEIVED",
+      duplicateDetected: false,
+      chargeCount: 1,
+      suspicious: false,
+      amount,
+      refundRequested,
+      cancellationRequested,
+      pendingPayment,
+      orderNotReceived: true,
+      refundStatusRequested,
+      wrongAmount,
+      accountAccessIssue,
+      evidenceSource: "Simulated transaction evidence"
+    };
+  }
+
+  if (cancellationRequested) {
+    return {
+      paymentStatus: "UNKNOWN",
+      orderStatus: "CANCELLED",
+      duplicateDetected: false,
+      chargeCount: 1,
+      suspicious: false,
+      amount,
+      refundRequested,
+      cancellationRequested: true,
+      pendingPayment,
+      orderNotReceived,
+      refundStatusRequested,
+      wrongAmount,
+      accountAccessIssue,
       evidenceSource: "Simulated transaction evidence"
     };
   }
@@ -206,6 +395,32 @@ function simulateInvestigation(message, aiAnalysis = null) {
       chargeCount: 1,
       suspicious: false,
       amount,
+      refundRequested,
+      cancellationRequested,
+      pendingPayment,
+      orderNotReceived,
+      refundStatusRequested,
+      wrongAmount,
+      accountAccessIssue,
+      evidenceSource: "Simulated transaction evidence"
+    };
+  }
+
+  if (wrongAmount) {
+    return {
+      paymentStatus: "CAPTURED",
+      orderStatus: "UNKNOWN",
+      duplicateDetected: false,
+      chargeCount: 1,
+      suspicious: false,
+      amount,
+      refundRequested,
+      cancellationRequested,
+      pendingPayment,
+      orderNotReceived,
+      refundStatusRequested,
+      wrongAmount: true,
+      accountAccessIssue,
       evidenceSource: "Simulated transaction evidence"
     };
   }
@@ -217,26 +432,33 @@ function simulateInvestigation(message, aiAnalysis = null) {
     chargeCount: 0,
     suspicious: false,
     amount,
+    refundRequested: false,
+    cancellationRequested: false,
+    pendingPayment: false,
+    orderNotReceived: false,
+    refundStatusRequested: false,
+    wrongAmount: false,
+    accountAccessIssue: false,
     evidenceSource: "Insufficient simulated transaction evidence"
   };
 }
 
-/*
- * IMPORTANT:
- * This is the trusted business-policy layer.
- * Gemini cannot override these rules.
- */
 function evaluatePolicy(investigation, intent) {
   const payment = investigation.paymentStatus;
   const order = investigation.orderStatus;
   const duplicate = !!investigation.duplicateDetected;
   const suspicious = !!investigation.suspicious;
+  const pendingPayment = !!investigation.pendingPayment;
+  const orderNotReceived = !!investigation.orderNotReceived;
+  const cancellationRequested = !!investigation.cancellationRequested;
+  const wrongAmount = !!investigation.wrongAmount;
+  const refundStatusRequested = !!investigation.refundStatusRequested;
+  const accountAccessIssue = !!investigation.accountAccessIssue;
 
   if (suspicious || intent === "SUSPICIOUS_TRANSACTION") {
     return {
       isEligible: false,
-      rule:
-        "IF suspicious transaction THEN escalate for human review",
+      rule: "IF suspicious transaction THEN escalate for human review",
       decision: "ESCALATE",
       message:
         "High-risk transaction requires manual verification before any automated financial action."
@@ -257,19 +479,115 @@ function evaluatePolicy(investigation, intent) {
   if (payment === "CAPTURED" && order === "FAILED") {
     return {
       isEligible: true,
-      rule:
-        "IF payment = CAPTURED AND order = FAILED THEN refund eligible",
+      rule: "IF payment = CAPTURED AND order = FAILED THEN refund eligible",
       decision: "REFUND",
       message:
         "Captured payment with failed order qualifies for refund."
     };
   }
 
+  if (pendingPayment || intent === "PAYMENT_PENDING") {
+    return {
+      isEligible: false,
+      rule: "IF payment is PENDING THEN request more information",
+      decision: "REQUEST_MORE_INFORMATION",
+      message:
+        "Payment is still pending. Additional information is required before automated resolution."
+    };
+  }
+
+  if (
+    orderNotReceived &&
+    (payment === "CAPTURED" || payment === "UNKNOWN") &&
+    order === "NOT_RECEIVED"
+  ) {
+    return {
+      isEligible: false,
+      rule:
+        "IF order is NOT_RECEIVED AND there is sufficient simulated evidence THEN escalate for order investigation",
+      decision: "ESCALATE",
+      message:
+        "Order delivery appears unresolved. Human investigation is required."
+    };
+  }
+
+  if (
+    cancellationRequested &&
+    (!payment || payment === "UNKNOWN" || order === "CANCELLED")
+  ) {
+    return {
+      isEligible: false,
+      rule:
+        "IF cancellation is requested AND fulfillment/payment state is unclear THEN request more information",
+      decision: "REQUEST_MORE_INFORMATION",
+      message:
+        "Cancellation request needs more evidence before automated review."
+    };
+  }
+
+  if (
+    refundStatusRequested &&
+    (!payment || payment === "UNKNOWN")
+  ) {
+    return {
+      isEligible: false,
+      rule:
+        "IF refund status is requested AND transaction evidence is insufficient THEN request more information",
+      decision: "REQUEST_MORE_INFORMATION",
+      message:
+        "Refund status cannot be confirmed without more transaction evidence."
+    };
+  }
+
+  if (wrongAmount && payment === "CAPTURED") {
+    return {
+      isEligible: false,
+      rule:
+        "IF wrong amount is reported AND discrepancy cannot be verified THEN escalate for review",
+      decision: "ESCALATE",
+      message:
+        "Amount discrepancy requires human review before any automated financial action."
+    };
+  }
+
+  if (accountAccessIssue || intent === "ACCOUNT_ACCESS") {
+    return {
+      isEligible: false,
+      rule: "IF account access is unclear THEN request more information",
+      decision: "REQUEST_MORE_INFORMATION",
+      message:
+        "Account access issue requires additional verification before resolution."
+    };
+  }
+
+  if (
+    intent === "UNKNOWN_ISSUE" ||
+    intent === "GENERAL_SUPPORT" ||
+    intent === "REFUND_REQUEST"
+  ) {
+    return {
+      isEligible: false,
+      rule: "UNKNOWN_ISSUE THEN request more information",
+      decision: "REQUEST_MORE_INFORMATION",
+      message:
+        "The issue is unclear and requires more evidence before automated resolution."
+    };
+  }
+
+  if (intent === "PAYMENT_FAILURE") {
+    return {
+      isEligible: false,
+      rule: "IF payment issue is reported WITHOUT verified evidence THEN request more information",
+      decision: "REQUEST_MORE_INFORMATION",
+      message:
+        "Payment issue requires more evidence before automated resolution."
+    };
+  }
+
   return {
     isEligible: false,
-    rule:
-      "DEFAULT: collect more evidence or escalate",
-    decision: "INFORMATION",
+    rule: "DEFAULT: collect more evidence or escalate",
+    decision: "REQUEST_MORE_INFORMATION",
     message:
       "Insufficient evidence to approve an automated financial action."
   };
@@ -282,8 +600,7 @@ function determineResolution(policy) {
     return {
       type: "ESCALATE",
       action: "HUMAN_ESCALATION",
-      summary:
-        "Escalated to human review due to suspicious transaction risk."
+      summary: "Escalated to human review due to risk or insufficient evidence."
     };
   }
 
@@ -291,8 +608,7 @@ function determineResolution(policy) {
     return {
       type: "REFUND",
       action: "REFUND_ONE_CHARGE",
-      summary:
-        "Initiated refund for the duplicate charge only."
+      summary: "Simulated refund for the duplicate charge only."
     };
   }
 
@@ -300,16 +616,22 @@ function determineResolution(policy) {
     return {
       type: "REFUND",
       action: "REFUND_FULL",
-      summary:
-        "Initiated refund for the failed order payment."
+      summary: "Simulated refund request created for the failed order."
+    };
+  }
+
+  if (decision === "REQUEST_MORE_INFORMATION") {
+    return {
+      type: "INFORMATION",
+      action: "REQUEST_MORE_DETAILS",
+      summary: "Additional information required before automated resolution."
     };
   }
 
   return {
     type: "INFORMATION",
     action: "REQUEST_MORE_DETAILS",
-    summary:
-      "Need more evidence before deciding the action."
+    summary: "Need more evidence before deciding the action."
   };
 }
 
@@ -328,14 +650,13 @@ function buildActionRecord(resolution, investigation) {
         .toUpperCase()}`,
       amount: 0,
       status: "PENDING_REVIEW",
-      note:
-        "High-risk transaction paused for manual investigation."
+      note: "Human review queue. No external payment system was contacted."
     };
   }
 
   if (resolution.type === "REFUND") {
     return {
-      action: "Refund request created",
+      action: "Simulated refund request created",
       reference: `RF-${Math.random()
         .toString(36)
         .slice(2, 8)
@@ -354,31 +675,38 @@ function buildActionRecord(resolution, investigation) {
       .toUpperCase()}`,
     amount: 0,
     status: "REQUESTED",
-    note:
-      "Customer asked to provide more clarifying information."
+    note: "Additional information required before automated resolution."
   };
 }
 
 function verifyAction(actionRecord, resolution) {
-  if (
-    actionRecord.status === "INITIATED" ||
-    actionRecord.status === "PENDING_REVIEW"
-  ) {
+  if (actionRecord.status === "INITIATED") {
     return {
-      expectedState:
-        "Action initiated and tracked",
+      expectedState: "Simulated refund request verified",
       status: "VERIFIED",
-      finalStatus:
-        resolution.type === "ESCALATE"
-          ? "ESCALATED_TO_HUMAN"
-          : "RESOLVED"
+      finalStatus: "RESOLVED"
+    };
+  }
+
+  if (actionRecord.status === "PENDING_REVIEW") {
+    return {
+      expectedState: "Human review required and tracked",
+      status: "VERIFIED",
+      finalStatus: "ESCALATED_TO_HUMAN"
+    };
+  }
+
+  if (actionRecord.status === "REQUESTED") {
+    return {
+      expectedState: "Information request created and tracked",
+      status: "VERIFIED",
+      finalStatus: "IN_PROGRESS"
     };
   }
 
   return {
-    expectedState:
-      "Action queued for follow-up",
-    status: "PENDING",
+    expectedState: "Action queued for follow-up",
+    status: "VERIFIED",
     finalStatus: "IN_PROGRESS"
   };
 }
@@ -409,81 +737,46 @@ function buildAuditTrail(
   };
 }
 
-function buildResult(
-  message,
-  analysis,
-  intent,
-  investigation
-) {
-  const policy = evaluatePolicy(
-    investigation,
-    intent.intent
-  );
-
-  const resolution =
-    determineResolution(policy);
-
-  const action =
-    buildActionRecord(
-      resolution,
-      investigation
-    );
-
-  const verification =
-    verifyAction(
-      action,
-      resolution
-    );
-
+function buildResult(message, analysis, intent, investigation) {
+  const policy = evaluatePolicy(investigation, intent.intent);
+  const resolution = determineResolution(policy);
+  const action = buildActionRecord(resolution, investigation);
+  const verification = verifyAction(action, resolution);
   const caseId = `RF-${Math.random()
     .toString(36)
     .slice(2, 8)
     .toUpperCase()}`;
 
-  const finalStatus =
-    verification.finalStatus || "IN_PROGRESS";
+  const finalStatus = verification.finalStatus || "IN_PROGRESS";
 
   return {
     caseId,
-
     intent: intent.intent,
-
     category: intent.category,
-
     sentiment: intent.sentiment,
-
     summary:
       analysis?.summary ||
       `${intent.intent} identified from customer message.`,
-
     investigation,
-
     policy: {
       rule: policy.rule,
       decision: policy.decision,
       message: policy.message
     },
-
     resolution,
-
     action,
-
     verification,
-
     finalStatus,
-
     aiAnalysis: analysis
       ? {
           provider: "Google Gemini",
           role: "Customer understanding",
-          summary:
-            analysis.summary || null
+          summary: analysis.summary || null
         }
       : {
           provider: "Deterministic fallback",
           role: "Customer understanding"
         },
-
     auditTrail: buildAuditTrail(
       caseId,
       intent.intent,
@@ -498,70 +791,26 @@ function buildResult(
 }
 
 async function resolveCase(message) {
-  const aiAnalysis =
-    await analyzeWithGemini(message);
+  const aiAnalysis = await analyzeWithGemini(message);
+  const deterministicIntent = inferIntent(message);
 
-  const deterministicIntent =
-    inferIntent(message);
-
-  /*
-   * Gemini enriches understanding,
-   * but deterministic signals remain
-   * the safety fallback.
-   */
   const intent = {
-    intent:
-      aiAnalysis?.intent ||
-      deterministicIntent.intent,
-
-    category:
-      aiAnalysis?.category ||
-      deterministicIntent.category,
-
-    sentiment:
-      aiAnalysis?.sentiment ||
-      deterministicIntent.sentiment
+    intent: aiAnalysis?.intent || deterministicIntent.intent,
+    category: aiAnalysis?.category || deterministicIntent.category,
+    sentiment: aiAnalysis?.sentiment || deterministicIntent.sentiment
   };
 
-  const investigation =
-    simulateInvestigation(
-      message,
-      aiAnalysis
-    );
+  const investigation = simulateInvestigation(message, aiAnalysis);
 
-  /*
-   * FINAL POLICY IS ALWAYS DETERMINISTIC.
-   */
-  return buildResult(
-    message,
-    aiAnalysis,
-    intent,
-    investigation
-  );
+  return buildResult(message, aiAnalysis, intent, investigation);
 }
 
-function createFallbackResponse(
-  message,
-  reason = "AI processing failed"
-) {
-  const intent =
-    inferIntent(message);
+function createFallbackResponse(message, reason = "AI processing failed") {
+  const intent = inferIntent(message);
+  const investigation = simulateInvestigation(message);
+  const result = buildResult(message, null, intent, investigation);
 
-  const investigation =
-    simulateInvestigation(message);
-
-  const result =
-    buildResult(
-      message,
-      null,
-      intent,
-      investigation
-    );
-
-  result.warnings = [
-    `Deterministic fallback used because: ${reason}`
-  ];
-
+  result.warnings = [`Deterministic fallback used because: ${reason}`];
   return result;
 }
 
